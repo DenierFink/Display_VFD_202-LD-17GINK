@@ -2,13 +2,14 @@
 #define VFD_DISPLAY_H
 
 #include <Arduino.h>
+#include <SPI.h>
 
 // Constantes do display
 #define VFD_MAX_COLUMNS 20    // Máximo de colunas suportadas pelo display
 #define VFD_TOTAL_BITS 114    // Total de bits a serem enviados ao display
 #define VFD_LINE1_START 0     // Primeiro bit da linha 1
 #define VFD_LINE2_START 36    // Primeiro bit da linha 2
-#define COLUMN_CHANGE_INTERVAL 1 // Intervalo mínimo para mudança de coluna (em ms)
+#define COLUMN_CHANGE_INTERVAL 1 // Reduzido para 1ms já que SPI é mais rápido
 
 // Funções para controle do display
 void vfd_init(int dataPin, int clockPin, int latchPin, int blankPin);

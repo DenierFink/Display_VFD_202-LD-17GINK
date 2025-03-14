@@ -15,6 +15,9 @@ static char textBuffer[2][VFD_MAX_COLUMNS + 1]; // [linha][coluna] +1 para o ter
 static uint8_t currentColumn = 0;              // Coluna atual sendo renderizada
 static unsigned long lastColumnChange = 0;      // Tempo da última alteração de coluna
 
+// Variável para controle de tempo
+static unsigned long lastColumnUpdate = 0;
+
 // Função para definir um bit específico no buffer
 static void setBit(int bitPos, bool value) {
   if (bitPos < 0 || bitPos > 113) return;
@@ -38,16 +41,17 @@ void vfd_init(int dataPin, int clockPin, int latchPin, int blankPin) {
   _blankPin = blankPin;
   
   // Configura os pinos
-  pinMode(_dataPin, OUTPUT);
-  pinMode(_clockPin, OUTPUT);
   pinMode(_latchPin, OUTPUT);
   pinMode(_blankPin, OUTPUT);
   
+  // Inicializa SPI
+  SPI.begin();
+  // Configura SPI: MSB first, modo 0, velocidade máxima
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  
   // Estado inicial
-  digitalWrite(_dataPin, LOW);
-  digitalWrite(_clockPin, LOW);
   digitalWrite(_latchPin, LOW);
-  digitalWrite(_blankPin, HIGH); // Display inicialmente desligado
+  digitalWrite(_blankPin, HIGH);
   
   // Limpa o display
   vfd_clear();
@@ -143,18 +147,29 @@ void renderCharacter(char ch, uint8_t line, int colPosition) {
 
 // Renderiza o caractere atual da coluna em multiplexação
 void vfd_renderCurrentColumn() {
-  // Limpa o buffer
-  memset(displayData, 0, sizeof(displayData));
+  // Verifica se já passou tempo suficiente desde a última atualização
+  unsigned long currentTime = micros();
+  static unsigned long lastMicroUpdate = 0;
   
-  // Renderiza o caractere da linha 1 (superior)
+  if (currentTime - lastMicroUpdate < (COLUMN_CHANGE_INTERVAL * 1000)) {
+    return;
+  }
+  lastMicroUpdate = currentTime;
+  
+  digitalWrite(_latchPin, LOW);
+  
+  // Limpa apenas os bits necessários no buffer ao invés de todo o buffer
+  for (int i = 0; i < 15; i++) {
+    displayData[i] = 0;
+  }
+  
+  // Renderiza os caracteres de ambas as linhas simultaneamente
   char ch1 = textBuffer[0][currentColumn];
-  renderCharacter(ch1, 0, currentColumn);
-  
-  // Renderiza o caractere da linha 2 (inferior)
   char ch2 = textBuffer[1][currentColumn];
+  renderCharacter(ch1, 0, currentColumn);
   renderCharacter(ch2, 1, currentColumn);
   
-  // Ativa apenas a coluna atual
+  // Ativa a coluna atual
   int controlBit1 = 73 + (currentColumn * 2);
   int controlBit2 = controlBit1 + 1;
   
@@ -163,8 +178,14 @@ void vfd_renderCurrentColumn() {
     setBit(controlBit2, true);
   }
   
-  // Envia os dados para o display
-  vfd_update();
+  // Envia os dados usando SPI
+  noInterrupts(); // Desativa interrupções durante o envio crítico de dados
+  for (int i = 14; i >= 0; i--) {
+    SPI.transfer(displayData[i]);
+  }
+  interrupts(); // Reativa interrupções
+  
+  digitalWrite(_latchPin, HIGH);
   
   // Avança para a próxima coluna
   currentColumn = (currentColumn + 1) % VFD_MAX_COLUMNS;
@@ -177,25 +198,16 @@ void vfd_fastColumnUpdate() {
 
 // Envia dados para o display - versão simplificada
 void vfd_update() {
-  // Desliga temporariamente o display
-  digitalWrite(_blankPin, HIGH);
-  
-  // Envia os dados serialmente
-  for (int i = 14; i >= 0; i--) {
-    byte currentByte = displayData[i];
-    for (int bit = 7; bit >= 0; bit--) {
-      digitalWrite(_dataPin, (currentByte >> bit) & 0x01);
-      digitalWrite(_clockPin, HIGH);
-      digitalWrite(_clockPin, LOW);
-    }
-  }
-  
-  // Aplica os dados
-  digitalWrite(_latchPin, HIGH);
   digitalWrite(_latchPin, LOW);
   
-  // Liga o display novamente
-  digitalWrite(_blankPin, LOW);
+  // Envia os dados usando SPI
+  noInterrupts();
+  for (int i = 14; i >= 0; i--) {
+    SPI.transfer(displayData[i]);
+  }
+  interrupts();
+  
+  digitalWrite(_latchPin, HIGH);
 } 
 
 // Função de teste mostrando todos os caracteres
